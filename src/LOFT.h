@@ -8,6 +8,8 @@
 #include "./base/camera.h"
 #include "./base/light.h"
 #include "./base/texture2d.h"
+#include "./base/framebuffer.h"
+#include "./base/fullscreen_quad.h"
 
 #include "model.h"
 #include "six_basic.h"
@@ -29,6 +31,7 @@ private:
 	std::vector<std::unique_ptr<BaseGeo> > _six_basic;
 
 	std::unique_ptr<GLSLProgram> _six_basic_shader;
+	bool _show_six_basic = false;
 	std::unique_ptr<GLSLProgram> _loft_shader;
 
 	std::unique_ptr<AmbientLight> _ambientLight;
@@ -38,7 +41,15 @@ private:
 	std::vector< std::shared_ptr<Texture2D> > _paintingsTexture;
 	int _current_texture = 0;
 
-	bool _show_six_basic = false;
+	// depth mapping resources
+	std::unique_ptr<Framebuffer> _depthMapFbo;
+	std::unique_ptr<Texture2D> _depthMap;
+	glm::mat4 _lightProjection;
+	glm::mat4 _lightView;
+	std::unique_ptr<GLSLProgram> _depthMapShader;
+	bool _shadow = false;
+	std::unique_ptr<FullscreenQuad> _fullscreenQuad;
+	std::unique_ptr<GLSLProgram> _depthMapTestShader;
 
 	void initShader();
 };

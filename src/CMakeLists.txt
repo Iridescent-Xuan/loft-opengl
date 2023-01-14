@@ -13,6 +13,8 @@ set(BASE_HDR ./base/application.h
              ./base/glsl_program.h
              ./base/camera.h
              ./base/frustum.h
+             ./base/framebuffer.h
+             ./base/fullscreen_quad.h
              ./base/plane.h
              ./base/transform.h
              ./base/bounding_box.h
@@ -30,7 +32,8 @@ set(BASE_SRC ./base/application.cpp
              ./base/skybox.cpp
              ./base/texture.cpp
              ./base/texture2d.cpp
-             ./base/texture_cubemap.cpp)
+             ./base/texture_cubemap.cpp
+             ./base/fullscreen_quad.cpp)
 
 add_executable(loft ${PROJECT_SRC} ${PROJECT_HDR} ${BASE_SRC} ${BASE_HDR})
 

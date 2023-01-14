@@ -5,6 +5,8 @@
 #include "LOFT.h"
 #include "print_screen.h"
 
+const GLuint SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
+
 const std::string obj_save_name = "six_basic.obj";
 const std::string modelRelPath = "obj/Bedroom.obj";
 const std::vector<std::string> paintingsTexturePath = { "texture/paintings1.png",
@@ -14,17 +16,23 @@ const std::string print_screen = "print_screen.bmp";
 
 LOFT::LOFT(const Options& options) : Application(options) {
 
+	// init model
+	_loft.reset(new Model(getAssetFullPath(modelRelPath)));
+	BoundingBox box = _loft->getBoundingBox();
+	box.min = glm::vec3(_loft->transform.getLocalMatrix() * glm::vec4(box.min, 1.0f));
+	box.max = glm::vec3(_loft->transform.getLocalMatrix() * glm::vec4(box.max, 1.0f));
+
 	// init lights
 	_ambientLight.reset(new AmbientLight);
 	_ambientLight->intensity = 0.3f;
 
 	_directionalLight.reset(new DirectionalLight);
+	_directionalLight->transform.position = glm::vec3(1.0f);
 	_directionalLight->intensity = 1.0f;
-	_directionalLight->transform.rotation = glm::angleAxis(glm::radians(45.0f), glm::normalize(glm::vec3(-1.0f)));
 
 	_spotLight.reset(new SpotLight);
 	_spotLight->intensity = 1.0f;
-	_spotLight->transform.position = glm::vec3(0.0f, 0.0f, 5.0f);
+	_spotLight->transform.position = glm::vec3(0.0f, 0.0f, -10.0f);
 	_spotLight->transform.rotation = glm::vec3(0.0f, 0.0f, 0.0f);
 	_spotLight->kq = 0.5f;
 
@@ -32,9 +40,6 @@ LOFT::LOFT(const Options& options) : Application(options) {
 	for (auto texture : paintingsTexturePath) {
 		_paintingsTexture.push_back(std::make_shared<ImageTexture2D>(getAssetFullPath(texture)));
 	}
-
-	// init model
-	_loft.reset(new Model(getAssetFullPath(modelRelPath)));
 
 	// init cameras
 	const float aspect = 1.0f * _windowWidth / _windowHeight;
@@ -44,7 +49,6 @@ LOFT::LOFT(const Options& options) : Application(options) {
 	// perspective camera
 	_camera.reset(new PerspectiveCamera(
 		glm::radians(60.0f), aspect, 0.1f, 10000.0f));
-	BoundingBox box = _loft->getBoundingBox();
 	_camera->transform.position = glm::vec3((box.min.x + box.max.x) / 2.0f, (box.min.y + box.max.y) / 2.0f, 5.0f);
 
 	// init six basic elements
@@ -59,7 +63,7 @@ LOFT::LOFT(const Options& options) : Application(options) {
 		glm::mat4 translation = glm::mat4(1.0f);
 		translation = glm::translate(translation, _six_basic[i]->_global_position);
 		glm::mat4 rotation_self = glm::mat4(1.0f);
-		rotation_self = glm::rotate(rotation_self, _six_basic[i]->_rotate_angle_self, glm::vec3(0.0f, 0.0f, 1.0f)); // resolve around z-axis
+		rotation_self = glm::rotate(rotation_self, _six_basic[i]->_rotate_angle_self, glm::vec3(-1.0f)); // resolve around z-axis
 		glm::mat4 scale = glm::mat4(1.0f);
 		scale = glm::scale(scale, _six_basic[i]->_scale);
 		glm::mat4 six_model = translation * rotation_self * scale;
@@ -68,6 +72,22 @@ LOFT::LOFT(const Options& options) : Application(options) {
 
 	// init shader
 	initShader();
+
+	// init depth map resources
+	_depthMapFbo.reset(new Framebuffer);
+	_depthMap.reset(new Texture2D(GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, GL_DEPTH_COMPONENT, GL_FLOAT));
+	_depthMapFbo->bind();
+	_depthMapFbo->attachTexture(*_depthMap, GL_DEPTH_ATTACHMENT);
+	glDrawBuffer(GL_NONE);
+	glReadBuffer(GL_NONE);
+	_depthMapFbo->unbind();
+
+	// init fullscreen quad
+	_fullscreenQuad.reset(new FullscreenQuad);
+
+	// transformation matrix for the light
+	_lightProjection = glm::ortho(-4.0f * aspect, 4.0f * aspect, -4.0f, 4.0f, znear, zfar);
+	_lightView = glm::lookAt(_directionalLight->transform.position, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
 	// init imgui
 	IMGUI_CHECKVERSION();
@@ -181,12 +201,6 @@ void LOFT::handleInput() {
 		}
 	}
 
-	if (_input.keyboard.keyStates[GLFW_KEY_L] != GLFW_RELEASE) {
-		if (_input.mouse.press.left == true) {
-			// TODO: change the position of the directional
-		}
-	}
-
 	const float angulerVelocity = 1.0f;
 	const float scaleRate = 0.25f;
 	static float flag = 1.0f;
@@ -237,10 +251,35 @@ void LOFT::handleInput() {
 void LOFT::renderFrame() {
 	showFpsInWindowTitle();
 
+	// the 1st pass: generate depth map
+	glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+	_depthMapFbo->bind();
+	glClear(GL_DEPTH_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
+
+	// configure view and projection matrix
+	_depthMapShader->use();
+	_depthMapShader->setUniformMat4("projection", _lightProjection);
+	_depthMapShader->setUniformMat4("view", _lightView);
+	_depthMapShader->setUniformMat4("model", _loft->transform.getLocalMatrix());
+
+	glCullFace(GL_FRONT);
+	_loft->draw();
+	glCullFace(GL_BACK);
+
+	// the 2nd pass: apply depth map
+	_depthMapFbo->unbind();
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, _windowWidth, _windowHeight);
 	glClearColor(_clearColor.r, _clearColor.g, _clearColor.b, _clearColor.a);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST);
-
+	
+	// glDisable(GL_DEPTH_TEST);
+	// _depthMapTestShader->use();
+	// _depthMap->bind();
+	// _fullscreenQuad->draw();
+	
 	glm::mat4 projection = _camera->getProjectionMatrix();
 	glm::mat4 view = _camera->getViewMatrix();
 
@@ -249,6 +288,8 @@ void LOFT::renderFrame() {
 	_loft_shader->setUniformMat4("projection", projection);
 	_loft_shader->setUniformMat4("view", view);
 	_loft_shader->setUniformMat4("model", _loft->transform.getLocalMatrix());
+	_loft_shader->setUniformMat4("lightSpaceMatrix", _lightProjection * _lightView);
+	_loft_shader->setUniformBool("mode", _shadow);
 	
 	for (int i = 0; i < _loft->_materials.size(); ++i) {
 		glm::vec3 vec;
@@ -271,14 +312,17 @@ void LOFT::renderFrame() {
 	_loft_shader->setUniformFloat("spotLight.kc", _spotLight->kc);
 	_loft_shader->setUniformFloat("spotLight.kl", _spotLight->kl);
 	_loft_shader->setUniformFloat("spotLight.kq", _spotLight->kq);
-	_loft_shader->setUniformVec3("directionalLight.direction", _directionalLight->transform.getFront());
+	_loft_shader->setUniformVec3("directionalLight.direction", -_directionalLight->transform.position);
 	_loft_shader->setUniformFloat("directionalLight.intensity", _directionalLight->intensity);
 	_loft_shader->setUniformVec3("directionalLight.color", _directionalLight->color);
 	_loft_shader->setUniformVec3("ambientLight.color", _ambientLight->color);
 	_loft_shader->setUniformFloat("ambientLight.intensity", _ambientLight->intensity);
 
 	// enable textures
-	_paintingsTexture[_current_texture]->bind();
+	_paintingsTexture[_current_texture]->bind(0);
+	_loft_shader->setUniformInt("mapKd", 0);
+	_depthMap->bind(1);
+	_loft_shader->setUniformInt("shadowMap", 1);
 
 	_loft->draw();
 
@@ -297,7 +341,7 @@ void LOFT::renderFrame() {
 			glm::mat4 translation = glm::mat4(1.0f);
 			translation = glm::translate(translation, _six_basic[i]->_global_position);
 			glm::mat4 rotation_self = glm::mat4(1.0f);
-			rotation_self = glm::rotate(rotation_self, _six_basic[i]->_rotate_angle_self, glm::vec3(0.0f, 0.0f, 1.0f)); // resolve around z-axis
+			rotation_self = glm::rotate(rotation_self, _six_basic[i]->_rotate_angle_self, glm::vec3(-1.0f)); // resolve around z-axis
 			glm::mat4 scale = glm::mat4(1.0f);
 			scale = glm::scale(scale, _six_basic[i]->_scale);
 			glm::mat4 six_model = translation * rotation_self * scale;
@@ -320,7 +364,7 @@ void LOFT::renderFrame() {
 		ImGui::End();
 	}
 	else {
-		ImGui::Text("Phong shading");
+		ImGui::Checkbox("shadow mapping", (bool*)&_shadow);
 		ImGui::Separator();
 		ImGui::NewLine();
 
@@ -334,6 +378,9 @@ void LOFT::renderFrame() {
 		ImGui::Separator();
 		ImGui::SliderFloat("intensity##2", &_directionalLight->intensity, 0.0f, 1.0f);
 		ImGui::ColorEdit3("color##2", (float*)&_directionalLight->color);
+		ImGui::SliderFloat("position.x##2", (float*)&_directionalLight->transform.position.x, -10.0f, 10.0f, "%f");
+		ImGui::SliderFloat("position.y##2", (float*)&_directionalLight->transform.position.y, -10.0f, 10.0f, "%f");
+		ImGui::SliderFloat("position.z##2", (float*)&_directionalLight->transform.position.z, -10.0f, 10.0f, "%f");
 		ImGui::NewLine();
 
 		ImGui::Text("spot light");
@@ -348,6 +395,8 @@ void LOFT::renderFrame() {
 
 	ImGui::Render();
 	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+	_lightView = glm::lookAt(_directionalLight->transform.position, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
 void LOFT::initShader() {
@@ -384,14 +433,17 @@ void LOFT::initShader() {
 		"out vec3 fPosition;\n"
 		"out vec3 fNormal;\n"
 		"out vec2 fTexCoord;\n"
+		"out vec4 fPositionLightSpace;\n"
 		"flat out int material_id;\n"
 
 		"uniform mat4 model;\n"
 		"uniform mat4 view;\n"
 		"uniform mat4 projection;\n"
+		"uniform mat4 lightSpaceMatrix;\n"
 
 		"void main() {\n"
 		"	fPosition = vec3(model * vec4(aPosition, 1.0f));\n"
+		"	fPositionLightSpace = lightSpaceMatrix * vec4(fPosition, 1.0f);\n"
 		"	fNormal = mat3(transpose(inverse(model))) * aNormal;\n"
 		"	fTexCoord = aTexCoord;\n"
 		"	gl_Position = projection * view * model * vec4(aPosition, 1.0f);\n"
@@ -403,6 +455,7 @@ void LOFT::initShader() {
 		"in vec3 fPosition;\n"
 		"in vec3 fNormal;\n"
 		"in vec2 fTexCoord;\n"
+		"in vec4 fPositionLightSpace;\n"
 		"flat in int material_id;\n"
 		"out vec4 color;\n"
 
@@ -446,6 +499,8 @@ void LOFT::initShader() {
 		"uniform vec3 cameraPosition;\n"
 		"uniform Material materials[20];\n"
 		"uniform sampler2D mapKd;\n"
+		"uniform sampler2D shadowMap;\n"
+		"uniform bool mode;\n"
 
 		"vec3 calcDirectionalLight_diffuse(vec3 normal) {\n"
 		"	vec3 lightDir = normalize(-directionalLight.direction);\n"
@@ -487,12 +542,37 @@ void LOFT::initShader() {
 		"	return spotLight.intensity * distance * attenuation * spotLight.color * spec * materials[material_id].ks;\n"
 		"}\n"
 
+		"float shadowCalculation(vec4 fragPosLightSpace) {\n"
+		"	// perspective division\n"
+		"	vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;\n"
+		"	// from [-1,1] to [0,1]\n"
+		"	projCoords = projCoords * 0.5 + 0.5;\n"
+		"	float closestDepth = texture(shadowMap, projCoords.xy).r;\n"
+		"	float currentDepth = projCoords.z;\n"
+		"	float bias = 0.000005;\n"
+		"	float shadow = 0.0;\n"
+		"	vec2 texelSize = 1.0 / textureSize(shadowMap, 0);\n"
+		"	for(int x = -1; x <= 1; ++x) {\n"
+		"		for(int y = -1; y <= 1; ++y) {\n"
+		"			float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;\n"
+		"			shadow += currentDepth - bias > pcfDepth ? 0.9 : 0.0;\n"
+		"		}\n"
+		"	}\n"
+		"	shadow /= 9.0;\n"
+		"	return shadow;\n"
+		"}\n"
+		
 		"void main() {\n"
 		"	vec3 ambient = materials[material_id].ka * ambientLight.color * ambientLight.intensity;\n"
 		"	vec3 normal = normalize(fNormal);\n"
 		"	vec3 diffuse = calcDirectionalLight_diffuse(normal) + calcSpotLight_diffuse(normal);\n"
 		"	vec3 specular = calcDirectionalLight_specular(normal) + calcSpotLight_specular(normal);\n"
-		"	vec4 coef = vec4(ambient + diffuse + specular, 1.0f);\n"
+		"	float shadow = shadowCalculation(fPositionLightSpace);\n"
+		"	vec4 coef;\n"
+		"	if(mode)\n"
+		"		coef = vec4(ambient + (1.0 - shadow) * (diffuse + specular), 1.0f);\n"
+		"	else\n"
+		"		coef = vec4(ambient + diffuse + specular, 1.0f);\n"
 		"	color = material_id == 11 ? coef * texture(mapKd, fTexCoord) : coef;\n"
 		"}\n";
 
@@ -500,4 +580,57 @@ void LOFT::initShader() {
 	_loft_shader->attachVertexShader(loft_vs);
 	_loft_shader->attachFragmentShader(loft_fs);
 	_loft_shader->link();
+
+	// shader for depth mapping
+	const char* shadow_vs =
+		"#version 330 core\n"
+		"layout(location = 0) in vec3 aPosition;\n"
+
+		"uniform mat4 projection;\n"
+		"uniform mat4 view;\n"
+		"uniform mat4 model;\n"
+
+		"void main() {\n"
+		"	gl_Position = projection * view * model * vec4(aPosition, 1.0f);\n"
+		"}\n";
+
+	const char* shadow_fs = 
+		"#version 330 core\n"
+		"void main() {\n"
+		"	// gl_FragDepth = gl_FragCoord.z;\n"
+		"}\n";
+
+	_depthMapShader.reset(new GLSLProgram);
+	_depthMapShader->attachVertexShader(shadow_vs);
+	_depthMapShader->attachFragmentShader(shadow_fs);
+	_depthMapShader->link();
+
+	const char* quad_vs =
+		"#version 330 core\n"
+		"layout(location = 0) in vec2 aPosition;\n"
+		"layout(location = 1) in vec2 aTexCoords;\n"
+
+		"out vec2 fTexCoords;\n"
+
+		"void main() {\n"
+		"	fTexCoords = aTexCoords;\n"
+		"	gl_Position = vec4(aPosition, 0.0f, 1.0f);\n"
+		"}\n";
+
+	const char* quad_fs = 
+		"#version 330 core\n"
+		"in vec2 fTexCoords;\n"
+		"out vec4 color;\n"
+
+		"uniform sampler2D depthMap;\n"
+
+		"void main() {\n"
+		"	float depthValue = texture(depthMap, fTexCoords).r;\n"
+		"	color = vec4(vec3(depthValue), 1.0);\n"
+		"}\n";
+
+	_depthMapTestShader.reset(new GLSLProgram);
+	_depthMapTestShader->attachVertexShader(quad_vs);
+	_depthMapTestShader->attachFragmentShader(quad_fs);
+	_depthMapTestShader->link();
 }
