@@ -13,6 +13,7 @@
 
 #include "model.h"
 #include "six_basic.h"
+#include "NURBS.h"
 
 class LOFT : public Application {
 public:
@@ -50,6 +51,9 @@ private:
 	bool _shadow = false;
 	std::unique_ptr<FullscreenQuad> _fullscreenQuad;
 	std::unique_ptr<GLSLProgram> _depthMapTestShader;
+
+	std::unique_ptr<NURBS> _NURBS;
+	bool _drawNURBS = false;
 
 	void initShader();
 };

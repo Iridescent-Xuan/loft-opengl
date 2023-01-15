@@ -89,6 +89,9 @@ LOFT::LOFT(const Options& options) : Application(options) {
 	_lightProjection = glm::ortho(-4.0f * aspect, 4.0f * aspect, -4.0f, 4.0f, znear, zfar);
 	_lightView = glm::lookAt(_directionalLight->transform.position, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
+	// init NURBS
+	_NURBS.reset(new NURBS());
+
 	// init imgui
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
@@ -245,6 +248,51 @@ void LOFT::handleInput() {
 	}
 	else _show_six_basic = false;
 
+	static bool pointMove = false;
+	static int pointToMove = -1;
+	if (_drawNURBS) {
+		float x = _input.mouse.move.xNow;
+		x = x * 2.f / _windowWidth - 1;
+		float y = _input.mouse.move.yNow;
+		y = -(y * 2.f / _windowHeight - 1);
+
+		if (_input.mouse.press.right == true) {
+			if (!pointMove) {
+				float pointSize = 0.04f;
+
+				int i = 0;
+				for (i; i < _NURBS->_controlPoints.size(); ++i) {
+					if (glm::distance(glm::vec2(x, y), _NURBS->_controlPoints[i])
+						<= pointSize * std::max(0.5f, _NURBS->_weights[i])) {
+						// move the existing point
+						pointMove = true;
+						pointToMove = i;
+						break;
+					}
+				}
+				if (i == _NURBS->_controlPoints.size()) {
+					// add a new point
+					_NURBS->_controlPoints.push_back(glm::vec2(x, y));
+					_NURBS->_weights.push_back(1.f);
+				}
+			}
+			else {
+				// update point position
+				_NURBS->_controlPoints[pointToMove] = glm::vec2(x, y);
+				pointMove = false;
+				pointToMove = -1;
+			}
+
+			_input.mouse.press.right = false;
+		}
+
+		// update data buffers
+		if (_NURBS->_controlPoints.size() >= 1)
+			_NURBS->generateControlPointsBuffers();
+		if (_NURBS->_controlPoints.size() >= 2)
+			_NURBS->generateSplineBuffers();
+	}
+
 	_input.forwardState();
 }
 
@@ -351,6 +399,10 @@ void LOFT::renderFrame() {
 		}
 	}
 
+	if (_drawNURBS) {
+		_NURBS->draw();
+	}
+
 	// draw ui elements
 	ImGui_ImplOpenGL3_NewFrame();
 	ImGui_ImplGlfw_NewFrame();
@@ -388,6 +440,10 @@ void LOFT::renderFrame() {
 		ImGui::SliderFloat("intensity##3", &_spotLight->intensity, 0.0f, 1.0f);
 		ImGui::ColorEdit3("color##3", (float*)&_spotLight->color);
 		ImGui::SliderFloat("angle##3", (float*)&_spotLight->angle, 0.0f, glm::radians(180.0f), "%f rad");
+		ImGui::NewLine();
+
+		ImGui::Checkbox("NURBS##4", (bool*)&_drawNURBS);
+		ImGui::SliderInt("order##4", (int*)&_NURBS->_order, 2, std::max(2, static_cast<int>(_NURBS->_controlPoints.size())), "%d");
 		ImGui::NewLine();
 
 		ImGui::End();

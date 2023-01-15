@@ -31,3 +31,13 @@ add_subdirectory(./external/stb)
 set_target_properties(stb PROPERTIES FOLDER "lib")
 
 add_subdirectory(./src)
+
+# include(cmake/CPM.cmake)
+
+# CPMAddPackage(
+# 	NAME freeglut
+# 	URL https://github.com/FreeGLUTProject/freeglut/archive/refs/tags/v3.4.0.tar.gz
+# 	SOURCE_DIR ${CMAKE_SOURCE_DIR}/freeglut
+# 	OPTIONS "FREEGLUT_BUILD_DEMOS OFF"
+#		"FREEGLUT_BUILD_STATIC_LIBS OFF")
+# set_target_properties(freeglut PROPERTIES FOLDER "freeglut")

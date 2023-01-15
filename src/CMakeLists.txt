@@ -22,14 +22,12 @@ set(BASE_HDR ./base/application.h
              ./base/light.h
              ./base/texture.h
              ./base/texture2d.h
-             ./base/texture_cubemap.h
-             ./base/skybox.h)
+             ./base/texture_cubemap.h)
 
 set(BASE_SRC ./base/application.cpp 
              ./base/glsl_program.cpp 
              ./base/camera.cpp 
              ./base/transform.cpp
-             ./base/skybox.cpp
              ./base/texture.cpp
              ./base/texture2d.cpp
              ./base/texture_cubemap.cpp
@@ -58,9 +56,11 @@ target_include_directories(loft PUBLIC ${THIRD_PARTY_LIBRARY_PATH}/glad/include)
 target_include_directories(loft PUBLIC ${THIRD_PARTY_LIBRARY_PATH}/glfw/include)
 target_include_directories(loft PUBLIC ${THIRD_PARTY_LIBRARY_PATH}/imgui)
 target_include_directories(loft PUBLIC ${THIRD_PARTY_LIBRARY_PATH}/stb)
+# target_include_directories(loft PUBLIC ${CMAKE_SOURCE_DIR}/freeglut/include/GL)
 
 target_link_libraries(loft glm)
 target_link_libraries(loft glad)
 target_link_libraries(loft glfw)
 target_link_libraries(loft imgui)
 target_link_libraries(loft stb)
+# target_link_libraries(loft freeglut)
